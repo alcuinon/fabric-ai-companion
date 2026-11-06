@@ -24,7 +24,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public final class VillagerTalk {
 	private static final double LOOK_RANGE = 5.0;
 	private static final double NAME_RANGE = 16.0;
-	private static final double HEAR_RANGE_SQUARED = 32.0 * 32.0;
 	private static final ConcurrentHashMap<String, Long> RECENT = new ConcurrentHashMap<>();
 
 	private VillagerTalk() {
@@ -136,17 +135,13 @@ public final class VillagerTalk {
 				}
 				return;
 			}
-			Component spoken = Component.literal("<" + name + "> ").withStyle(ChatFormatting.GOLD)
-					.append(Component.literal(reply));
-			if (speaker != null) {
-				speaker.sendSystemMessage(spoken);
+			if (entity instanceof Villager talking) {
+				VillagerBubble.show(talking, reply);
+				return;
 			}
-			if (entity != null && level != null) {
-				for (ServerPlayer nearby : level.players()) {
-					if (nearby != speaker && nearby.distanceToSqr(entity) <= HEAR_RANGE_SQUARED) {
-						nearby.sendSystemMessage(spoken);
-					}
-				}
+			if (speaker != null) {
+				speaker.sendSystemMessage(Component.literal("<" + name + "> ").withStyle(ChatFormatting.GOLD)
+						.append(Component.literal(reply)));
 			}
 		});
 	}

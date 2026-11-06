@@ -14,6 +14,7 @@ public class AICompanion implements ModInitializer {
 		OpenAIConversations conversations = new OpenAIConversations();
 		ConversationStore.register();
 		VillagerTalk.register(conversations);
+		VillagerBubble.register();
 		CompanionRemarks.register(conversations);
 		LOGGER.info("AI Companion ready for Minecraft 26.1.1");
 	}
