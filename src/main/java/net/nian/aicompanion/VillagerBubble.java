@@ -4,8 +4,6 @@ import com.mojang.math.Transformation;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.ChatFormatting;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.chat.FontDescription;
-import net.minecraft.resources.Identifier;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
@@ -34,7 +32,6 @@ public final class VillagerBubble {
 	private static final String UNTIL_PREFIX = "until:";
 	private static final int MIN_TICKS = 20 * 5;
 	private static final int MAX_TICKS = 20 * 12;
-	private static final FontDescription BUBBLE_FONT = new FontDescription.Resource(Identifier.fromNamespaceAndPath("minecraft", "uniform"));
 	private static final Map<UUID, LiveBubble> ACTIVE = new ConcurrentHashMap<>();
 
 	private static int tick;
@@ -62,6 +59,8 @@ public final class VillagerBubble {
 		LiveBubble current = ACTIVE.get(villager.getUUID());
 		if (current != null && level.getEntity(current.displayId) instanceof Display.TextDisplay existing) {
 			write(existing, text, expire);
+			style(existing);
+			place(level, existing, villager);
 			current.expire = expire;
 			speak(level, villager);
 			return;
@@ -69,26 +68,14 @@ public final class VillagerBubble {
 
 		Display.TextDisplay display = new Display.TextDisplay(EntityType.TEXT_DISPLAY, level);
 		write(display, text, expire);
-		display.setLineWidth(240);
-		display.setBackgroundColor(0xF4FFF8EE);
-		display.setTextOpacity((byte) -1);
-		display.setFlags((byte) 0);
-		display.setBillboardConstraints(Display.BillboardConstraints.VERTICAL);
-		display.setTransformation(new Transformation(
-				new Vector3f(0f, 0f, 0f),
-				new Quaternionf(),
-				new Vector3f(0.62f, 0.62f, 0.62f),
-				new Quaternionf()));
-		display.setShadowRadius(0f);
-		display.setViewRange(4f);
-		display.setPosRotInterpolationDuration(2);
+		style(display);
 		display.setNoGravity(true);
 		display.addTag(TAG);
-		Vec3 anchor = anchor(villager);
-		display.setPos(anchor.x, anchor.y, anchor.z);
+		place(level, display, villager);
 		if (!level.addFreshEntity(display)) {
 			return;
 		}
+		place(level, display, villager);
 		speak(level, villager);
 		ACTIVE.put(villager.getUUID(), new LiveBubble(display.getUUID(), villager.getUUID(), level.dimension(), expire));
 	}
@@ -121,10 +108,7 @@ public final class VillagerBubble {
 				bubbles.remove();
 				continue;
 			}
-			Vec3 anchor = anchor(villager);
-			if (display.distanceToSqr(anchor) > 0.0004) {
-				display.setPos(anchor.x, anchor.y, anchor.z);
-			}
+			place(level, display, villager);
 		}
 	}
 
@@ -140,10 +124,61 @@ public final class VillagerBubble {
 		}
 	}
 
+	private static void style(Display.TextDisplay display) {
+		display.setLineWidth(160);
+		display.setBackgroundColor(0xC0000000);
+		display.setTextOpacity((byte) -1);
+		display.setFlags((byte) 0);
+		display.setBillboardConstraints(Display.BillboardConstraints.CENTER);
+		display.setTransformation(new Transformation(
+				new Vector3f(0f, 0f, 0f),
+				new Quaternionf(),
+				new Vector3f(0.5f, 0.5f, 0.5f),
+				new Quaternionf()));
+		display.setShadowRadius(0f);
+		display.setShadowStrength(0f);
+		display.setViewRange(4f);
+		display.setPosRotInterpolationDuration(0);
+	}
+
+	private static void place(ServerLevel level, Display.TextDisplay display, Villager villager) {
+		display.setBillboardConstraints(Display.BillboardConstraints.CENTER);
+		display.setPosRotInterpolationDuration(0);
+		Vec3 anchor = anchor(villager);
+		ServerPlayer reader = nearest(level, villager);
+		float yaw = display.getYRot();
+		float pitch = display.getXRot();
+		if (reader != null) {
+			double dx = reader.getX() - anchor.x;
+			double dy = reader.getEyeY() - anchor.y;
+			double dz = reader.getZ() - anchor.z;
+			double flat = Math.sqrt(dx * dx + dz * dz);
+			yaw = (float) Math.toDegrees(Math.atan2(-dx, dz));
+			pitch = (float) -Math.toDegrees(Math.atan2(dy, Math.max(flat, 0.001)));
+		}
+		display.setPos(anchor.x, anchor.y, anchor.z);
+		display.setYRot(yaw);
+		display.setXRot(pitch);
+	}
+
+	private static ServerPlayer nearest(ServerLevel level, Villager villager) {
+		ServerPlayer closest = null;
+		double best = 48.0 * 48.0;
+		for (ServerPlayer player : level.players()) {
+			if (player.isSpectator()) {
+				continue;
+			}
+			double distance = player.distanceToSqr(villager);
+			if (distance < best) {
+				best = distance;
+				closest = player;
+			}
+		}
+		return closest;
+	}
+
 	private static void write(Display.TextDisplay display, String text, long expire) {
-		display.setText(Component.literal(pad(text)).withStyle(style -> style
-				.withFont(BUBBLE_FONT)
-				.withColor(ChatFormatting.DARK_GRAY)));
+		display.setText(Component.literal(pad(text)).withStyle(ChatFormatting.WHITE));
 		for (String tag : java.util.List.copyOf(display.entityTags())) {
 			if (tag.startsWith(UNTIL_PREFIX)) {
 				display.removeTag(tag);
@@ -169,31 +204,31 @@ public final class VillagerBubble {
 		double x = villager.getX();
 		double y = villager.getY();
 		double z = villager.getZ();
-		double height = villager.getBbHeight();
-		Vec3 look = villager.getLookAngle();
-		double horizontal = Math.sqrt(look.x * look.x + look.z * look.z);
-		double forwardX = horizontal < 1.0E-4 ? 0 : look.x / horizontal;
-		double forwardZ = horizontal < 1.0E-4 ? 1 : look.z / horizontal;
+		double height = Math.max(1.0, villager.getBbHeight());
+		double rad = Math.toRadians(villager.getYRot());
+		double forwardX = -Math.sin(rad);
+		double forwardZ = Math.cos(rad);
 		double sideX = -forwardZ;
 		double sideZ = forwardX;
+		double chest = y + height * 0.58;
 		return switch (ConfigLoader.bubblePosition()) {
-			case "head", "upper", "upper_head" -> new Vec3(x, y + height + 0.38, z);
-			case "left" -> new Vec3(x - sideX * 0.75, y + height * 0.62, z - sideZ * 0.75);
-			case "right" -> new Vec3(x + sideX * 0.75, y + height * 0.62, z + sideZ * 0.75);
-			default -> new Vec3(x + forwardX * 0.68, y + height * 0.58, z + forwardZ * 0.68);
+			case "head", "upper", "upper_head" -> new Vec3(x, y + height + 0.32, z);
+			case "left" -> new Vec3(x + sideX * 0.55, chest, z + sideZ * 0.55);
+			case "right" -> new Vec3(x - sideX * 0.55, chest, z - sideZ * 0.55);
+			default -> new Vec3(x + forwardX * 0.4, chest, z + forwardZ * 0.4);
 		};
 	}
 
 	private static String pad(String text) {
 		String[] words = text.trim().split("\\s+");
 		StringBuilder line = new StringBuilder();
-		StringBuilder block = new StringBuilder("\n");
+		StringBuilder block = new StringBuilder();
 		for (String word : words) {
 			if (word.isEmpty()) {
 				continue;
 			}
-			if (!line.isEmpty() && line.length() + 1 + word.length() > 22) {
-				block.append("  ").append(line).append("  \n");
+			if (!line.isEmpty() && line.length() + 1 + word.length() > 28) {
+				block.append(' ').append(line).append(" \n");
 				line.setLength(0);
 			}
 			if (!line.isEmpty()) {
@@ -202,7 +237,7 @@ public final class VillagerBubble {
 			line.append(word);
 		}
 		if (!line.isEmpty()) {
-			block.append("  ").append(line).append("  \n");
+			block.append(' ').append(line).append(' ');
 		}
 		return block.toString();
 	}
