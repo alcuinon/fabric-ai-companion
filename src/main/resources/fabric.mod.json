@@ -1,0 +1,40 @@
+{
+	"schemaVersion": 1,
+	"id": "aicompanion",
+	"version": "${version}",
+	"name": "AI Companion",
+	"description": "",
+	"authors": [
+		"NiaNPH"
+	],
+	"contact": {
+		"homepage": "",
+		"sources": ""
+	},
+	"license": "©R",
+	"icon": "assets/aicompanion/icon.png",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"net.nian.aicompanion.AICompanion"
+		],
+		"fabric-datagen": [
+			"net.nian.aicompanion.AICompanionDataGenerator"
+		],
+		"client": [
+			"net.nian.aicompanion.AICompanionClient"
+		]
+	},
+	"mixins": [
+		"aicompanion.mixins.json"
+	],
+	"depends": {
+		"fabricloader": ">=0.16.14",
+		"minecraft": "~1.21.1",
+		"java": ">=21",
+		"fabric-api": "*"
+	},
+	"suggests": {
+		"another-mod": "*"
+	}
+}
