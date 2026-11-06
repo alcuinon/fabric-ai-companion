@@ -13,8 +13,10 @@ import net.minecraft.world.InteractionResult;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.npc.villager.Villager;
 import net.minecraft.world.entity.projectile.ProjectileUtil;
+import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.EntityHitResult;
+import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.Comparator;
@@ -25,7 +27,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 public final class VillagerTalk {
-	private static final double LOOK_RANGE = 5.0;
+	private static final double LOOK_RANGE = 32.0;
+	private static final double NEAR_RANGE = 8.0;
 	private static final double NAME_RANGE = 16.0;
 	private static final ConcurrentHashMap<String, Long> RECENT = new ConcurrentHashMap<>();
 	private static final Map<UUID, Long> NEXT_VILLAGER_TALK = new HashMap<>();
@@ -84,11 +87,9 @@ public final class VillagerTalk {
 				return true;
 			}
 
-			if (sender.isShiftKeyDown()) {
-				Villager lookedAt = lookingAt(sender);
-				if (lookedAt != null) {
-					askVillager(conversations, sender, lookedAt, sender.getName().getString() + ": " + text, true, true);
-				}
+			Villager target = villagerForChat(sender);
+			if (target != null) {
+				askVillager(conversations, sender, target, sender.getName().getString() + ": " + text, true, true);
 			}
 			return true;
 		});
@@ -222,16 +223,57 @@ public final class VillagerTalk {
 				false, false);
 	}
 
+	private static Villager villagerForChat(ServerPlayer player) {
+		Villager lookedAt = lookingAt(player);
+		if (lookedAt != null) {
+			return lookedAt;
+		}
+		return closest(player);
+	}
+
 	private static Villager lookingAt(ServerPlayer player) {
 		Vec3 start = player.getEyePosition();
-		Vec3 end = start.add(player.getLookAngle().scale(LOOK_RANGE));
-		AABB box = player.getBoundingBox().expandTowards(player.getLookAngle().scale(LOOK_RANGE)).inflate(1.0);
+		Vec3 look = player.getLookAngle();
+		Vec3 end = start.add(look.scale(LOOK_RANGE));
+		HitResult block = player.level().clip(new ClipContext(start, end, ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, player));
+		if (block.getType() != HitResult.Type.MISS) {
+			end = block.getLocation();
+		}
+		double reachSqr = start.distanceToSqr(end);
+		AABB box = player.getBoundingBox().expandTowards(look.scale(LOOK_RANGE)).inflate(1.0);
 		EntityHitResult hit = ProjectileUtil.getEntityHitResult(
-				player, start, end, box, entity -> entity instanceof Villager && entity.isAlive(), LOOK_RANGE * LOOK_RANGE);
+				player, start, end, box, entity -> entity instanceof Villager && entity.isAlive(), reachSqr);
 		if (hit != null && hit.getEntity() instanceof Villager villager) {
 			return villager;
 		}
-		return null;
+		Villager aimed = null;
+		double bestDot = 0.99;
+		for (Villager villager : player.level().getEntitiesOfClass(Villager.class, player.getBoundingBox().inflate(LOOK_RANGE), Villager::isAlive)) {
+			Vec3 to = villager.getEyePosition().subtract(start);
+			double distanceSqr = to.lengthSqr();
+			if (distanceSqr < 0.25 || distanceSqr > LOOK_RANGE * LOOK_RANGE || distanceSqr > reachSqr + 1.0) {
+				continue;
+			}
+			double dot = look.dot(to.scale(1.0 / Math.sqrt(distanceSqr)));
+			if (dot > bestDot) {
+				bestDot = dot;
+				aimed = villager;
+			}
+		}
+		return aimed;
+	}
+
+	private static Villager closest(ServerPlayer player) {
+		Villager chosen = null;
+		double best = NEAR_RANGE * NEAR_RANGE;
+		for (Villager villager : player.level().getEntitiesOfClass(Villager.class, player.getBoundingBox().inflate(NEAR_RANGE), Villager::isAlive)) {
+			double distance = villager.distanceToSqr(player);
+			if (distance < best) {
+				best = distance;
+				chosen = villager;
+			}
+		}
+		return chosen;
 	}
 
 	private static Villager findNamed(ServerPlayer player, String token) {
