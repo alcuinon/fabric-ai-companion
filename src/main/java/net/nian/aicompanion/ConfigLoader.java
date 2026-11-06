@@ -1,6 +1,7 @@
 package net.nian.aicompanion;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
@@ -8,6 +9,7 @@ import java.io.InputStream;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Locale;
 
 public final class ConfigLoader {
 	private static final Path CONFIG_PATH = FabricLoader.getInstance()
@@ -43,6 +45,10 @@ public final class ConfigLoader {
 					config = loaded;
 				}
 			}
+			if (config.Settings.Bubble_Position == null || config.Settings.Bubble_Position.isBlank()) {
+				config.Settings.Bubble_Position = "front";
+				Files.writeString(CONFIG_PATH, new GsonBuilder().setPrettyPrinting().create().toJson(config));
+			}
 		} catch (IOException e) {
 			AICompanion.LOGGER.error("Could not load config/aicompanion_config.json", e);
 		}
@@ -72,6 +78,14 @@ public final class ConfigLoader {
 
 	public static boolean ambientRemarks() {
 		return Boolean.TRUE.equals(config.Settings.Ambient_Remarks);
+	}
+
+	public static String bubblePosition() {
+		String value = config.Settings.Bubble_Position;
+		if (value == null || value.isBlank()) {
+			return "front";
+		}
+		return value.trim().toLowerCase(Locale.ROOT);
 	}
 
 	public static String apiBase() {

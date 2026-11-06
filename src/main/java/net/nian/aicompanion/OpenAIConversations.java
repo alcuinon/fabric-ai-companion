@@ -82,12 +82,12 @@ public final class OpenAIConversations {
 			AICompanion.LOGGER.info("Opened an OpenAI conversation for {}", key);
 		}
 		try {
-			return respond(conversationId, userText);
+			return respond(conversationId, instructions, userText);
 		} catch (MissingConversation missing) {
 			String freshId = createConversation(instructions);
 			ConversationStore.put(world, key, freshId);
 			AICompanion.LOGGER.info("Reopened the OpenAI conversation for {}", key);
-			return respond(freshId, userText);
+			return respond(freshId, instructions, userText);
 		}
 	}
 
@@ -117,10 +117,13 @@ public final class OpenAIConversations {
 		return created.get("id").getAsString();
 	}
 
-	private String respond(String conversationId, String userText) throws IOException, InterruptedException, MissingConversation {
+	private String respond(String conversationId, String instructions, String userText) throws IOException, InterruptedException, MissingConversation {
 		JsonObject body = new JsonObject();
 		body.addProperty("model", ConfigLoader.model());
 		body.addProperty("conversation", conversationId);
+		if (instructions != null && !instructions.isBlank()) {
+			body.addProperty("instructions", instructions);
+		}
 		body.addProperty("input", userText);
 		body.addProperty("max_output_tokens", 80);
 

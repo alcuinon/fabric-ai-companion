@@ -1,5 +1,6 @@
 package net.nian.aicompanion;
 
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.event.player.UseEntityCallback;
 import net.fabricmc.fabric.api.message.v1.ServerMessageEvents;
 import net.minecraft.ChatFormatting;
@@ -17,7 +18,9 @@ import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 
 import java.util.Comparator;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -25,6 +28,11 @@ public final class VillagerTalk {
 	private static final double LOOK_RANGE = 5.0;
 	private static final double NAME_RANGE = 16.0;
 	private static final ConcurrentHashMap<String, Long> RECENT = new ConcurrentHashMap<>();
+	private static final Map<UUID, Long> NEXT_VILLAGER_TALK = new HashMap<>();
+	private static final Map<UUID, Long> NEXT_PLAYER_TALK = new HashMap<>();
+	private static final long VILLAGER_QUIET_TICKS = 20L * 60 * 12;
+	private static final long PLAYER_QUIET_TICKS = 20L * 60 * 4;
+	private static int initiativeTick;
 
 	private VillagerTalk() {
 	}
@@ -41,7 +49,7 @@ public final class VillagerTalk {
 				String speaker = serverPlayer.getName().getString();
 				askVillager(conversations, serverPlayer, villager,
 						speaker + " walks up and wants to talk. Greet them. If you have met them before, show that you remember.",
-						false);
+						false, true);
 			}
 			return InteractionResult.SUCCESS;
 		});
@@ -73,7 +81,7 @@ public final class VillagerTalk {
 					String line = rest.isEmpty()
 							? speaker + " says hello. Greet them, and show that you remember them if you have talked before."
 							: speaker + ": " + rest;
-					askVillager(conversations, sender, named, line, true);
+					askVillager(conversations, sender, named, line, true, true);
 				}
 				return true;
 			}
@@ -81,10 +89,19 @@ public final class VillagerTalk {
 			if (sender.isShiftKeyDown()) {
 				Villager lookedAt = lookingAt(sender);
 				if (lookedAt != null) {
-					askVillager(conversations, sender, lookedAt, sender.getName().getString() + ": " + text, true);
+					askVillager(conversations, sender, lookedAt, sender.getName().getString() + ": " + text, true, true);
 				}
 			}
 			return true;
+		});
+
+		ServerTickEvents.END_SERVER_TICK.register(server -> {
+			if (ConfigLoader.apiKey().isEmpty() || (++initiativeTick % 200) != 0) {
+				return;
+			}
+			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
+				considerSpeaking(conversations, player);
+			}
 		});
 	}
 
@@ -112,8 +129,14 @@ public final class VillagerTalk {
 		});
 	}
 
-	private static void askVillager(OpenAIConversations conversations, ServerPlayer sender, Villager villager, String line, boolean paceChat) {
-		if (!hasKey(sender) || (paceChat && tooSoon("chat:" + sender.getUUID(), 800))) {
+	private static void askVillager(OpenAIConversations conversations, ServerPlayer sender, Villager villager, String line, boolean paceChat, boolean warnMissingKey) {
+		if (ConfigLoader.apiKey().isEmpty()) {
+			if (warnMissingKey) {
+				hasKey(sender);
+			}
+			return;
+		}
+		if (paceChat && tooSoon("chat:" + sender.getUUID(), 800)) {
 			return;
 		}
 		MinecraftServer server = sender.level().getServer();
@@ -125,7 +148,8 @@ public final class VillagerTalk {
 		var dimension = villager.level().dimension();
 		String name = displayName(villager);
 		String key = "villager:" + villagerId;
-		conversations.ask(server, key, villagerInstructions(villager, name), line, reply -> {
+		String instructions = VillagerContext.instructions(villager, sender);
+		conversations.ask(server, key, instructions, line, reply -> {
 			ServerPlayer speaker = server.getPlayerList().getPlayer(speakerId);
 			ServerLevel level = server.getLevel(dimension);
 			Entity entity = level == null ? null : level.getEntity(villagerId);
@@ -165,31 +189,39 @@ public final class VillagerTalk {
 				+ "Reply in one or two short spoken sentences. Never mention being an AI, a model, or a conversation.";
 	}
 
-	private static String villagerInstructions(Villager villager, String name) {
-		String job = professionPath(villager);
-		return "You are " + name + ", a " + job.replace('_', ' ')
-				+ " villager living in a Minecraft world. " + flavor(job) + " "
-				+ "Many different players may speak to you, and this is one continuous life. "
-				+ "Each message starts with the speaker's name. Remember who they are and what you have already said to each of them. "
-				+ "Stay in the world. Reply in one or two short spoken sentences. Never mention being an AI, a model, or a conversation.";
-	}
-
-	private static String flavor(String job) {
-		return switch (job) {
-			case "farmer" -> "You care about crops, weather, and whether people have eaten.";
-			case "librarian" -> "You love books and perk up when someone mentions something worth writing down.";
-			case "cleric" -> "You speak gently and notice when someone is hurt or frightened.";
-			case "armorer", "weaponsmith", "toolsmith" -> "You talk like a smith, proud of your work and wary of lava.";
-			case "butcher" -> "You are hearty and food is never far from your mind.";
-			case "cartographer" -> "You love maps, biomes, and news from far away.";
-			case "fletcher" -> "You notice bows, arrows, and anything that flies.";
-			case "fisherman" -> "You talk about water, rain, boats, and the catch.";
-			case "leatherworker" -> "You notice hides, armor, and the state of the road.";
-			case "mason" -> "You notice stone, buildings, and whether the ground feels solid.";
-			case "shepherd" -> "You are warm and talk easily about animals.";
-			case "nitwit" -> "You are cheerful, a little scattered, and still remember people.";
-			default -> "You are a neighbor in the village, and you remember faces.";
-		};
+	private static void considerSpeaking(OpenAIConversations conversations, ServerPlayer player) {
+		if (player.isSpectator() || player.isDeadOrDying()) {
+			return;
+		}
+		long now = player.level().getGameTime();
+		if (now < NEXT_PLAYER_TALK.getOrDefault(player.getUUID(), 0L)) {
+			return;
+		}
+		Villager chosen = null;
+		double best = 36;
+		for (Villager villager : player.level().getEntitiesOfClass(Villager.class, player.getBoundingBox().inflate(6), Villager::isAlive)) {
+			if (now < NEXT_VILLAGER_TALK.getOrDefault(villager.getUUID(), 0L) || VillagerBubble.isActive(villager.getUUID())) {
+				continue;
+			}
+			double distance = villager.distanceToSqr(player);
+			if (distance < best) {
+				best = distance;
+				chosen = villager;
+			}
+		}
+		if (chosen == null) {
+			return;
+		}
+		long mix = now ^ player.getUUID().getLeastSignificantBits() ^ chosen.getUUID().getLeastSignificantBits();
+		if (Math.floorMod(mix, 12) != 0) {
+			return;
+		}
+		NEXT_VILLAGER_TALK.put(chosen.getUUID(), now + VILLAGER_QUIET_TICKS);
+		NEXT_PLAYER_TALK.put(player.getUUID(), now + PLAYER_QUIET_TICKS);
+		String name = player.getName().getString();
+		askVillager(conversations, player, chosen,
+				name + " is nearby. " + VillagerContext.impulse(chosen, player) + ". Say one short sentence to " + name + ".",
+				false, false);
 	}
 
 	private static Villager lookingAt(ServerPlayer player) {
@@ -227,7 +259,7 @@ public final class VillagerTalk {
 		return Character.toUpperCase(job.charAt(0)) + job.substring(1);
 	}
 
-	private static String professionPath(Villager villager) {
+	static String professionPath(Villager villager) {
 		return villager.getVillagerData().profession().unwrapKey()
 				.map(key -> key.identifier().getPath())
 				.orElse("villager");
