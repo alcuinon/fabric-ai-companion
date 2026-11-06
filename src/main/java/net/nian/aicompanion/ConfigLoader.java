@@ -5,56 +5,93 @@ import net.fabricmc.loader.api.FabricLoader;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.OutputStream;
 import java.io.Reader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
-public class ConfigLoader {
+public final class ConfigLoader {
+	private static final Path CONFIG_PATH = FabricLoader.getInstance()
+			.getConfigDir()
+			.resolve("aicompanion_config.json");
+	private static final Gson GSON = new Gson();
 
-    private static final Path CONFIG_PATH = FabricLoader.getInstance()
-            .getConfigDir().resolve("aicompanion_config.json");
+	public static Config config = new Config();
 
-    public static Config config;
+	private ConfigLoader() {
+	}
 
-    public static void loadConfig() {
-        try {
-            // Check if the config file exists
-            if (!Files.exists(CONFIG_PATH)) {
-                // Copy the default config from assets if it does not exist
-                Path defaultConfigPath = FabricLoader.getInstance().getGameDirectory().toPath()
-                        .resolve("assets/aicompanion/config/aicompanion_config.json");
+	public static void load() {
+		try {
+			if (!Files.exists(CONFIG_PATH)) {
+				Files.createDirectories(CONFIG_PATH.getParent());
+				try (InputStream input = ConfigLoader.class.getClassLoader()
+						.getResourceAsStream("assets/aicompanion/config/aicompanion_config.json")) {
+					if (input != null) {
+						Files.copy(input, CONFIG_PATH);
+					} else {
+						AICompanion.LOGGER.error("Default AI Companion config is missing from the mod jar.");
+					}
+				}
+			}
 
-                // Create the parent directories if they do not exist
-                Files.createDirectories(CONFIG_PATH.getParent());
+			try (Reader reader = Files.newBufferedReader(CONFIG_PATH)) {
+				Config loaded = GSON.fromJson(reader, Config.class);
+				if (loaded != null) {
+					if (loaded.Settings == null) {
+						loaded.Settings = new Config.Settings();
+					}
+					config = loaded;
+				}
+			}
+		} catch (IOException e) {
+			AICompanion.LOGGER.error("Could not load config/aicompanion_config.json", e);
+		}
+	}
 
-                // Open the input stream from the resources
-                try (InputStream inputStream = Config.class.getClassLoader().getResourceAsStream("assets/aicompanion/config/aicompanion_config.json")) {
-                    if (inputStream != null) {
-                        // Write the content to the config directory
-                        try (OutputStream outputStream = Files.newOutputStream(CONFIG_PATH)) {
-                            byte[] buffer = new byte[1024];
-                            int bytesRead;
-                            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                                outputStream.write(buffer, 0, bytesRead);
-                            }
-                        }
-                    } else {
-                        System.err.println("Default config file not found in resources.");
-                    }
-                }
-            }
+	public static String apiKey() {
+		String key = config.Settings.Open_AI_API_Key;
+		return key == null ? "" : key.trim();
+	}
 
-            // Load the config file into the TierDropConfig object
-            Reader reader = Files.newBufferedReader(CONFIG_PATH);
-            config = new Gson().fromJson(reader, Config.class);
+	public static String model() {
+		String model = config.Settings.Open_AI_Model;
+		return model == null || model.isBlank() ? "gpt-4o-mini" : model.trim();
+	}
 
-            if (config == null) {
-                System.err.println("Failed to load config.");
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
+	public static String companionName() {
+		String name = config.Settings.AI_Companion_Name;
+		return name == null || name.isBlank() ? "ai" : name.trim();
+	}
 
+	public static String personality() {
+		String personality = config.Settings.AI_Personality;
+		return personality == null || personality.isBlank()
+				? "A friendly Minecraft companion."
+				: personality.trim();
+	}
+
+	public static boolean ambientRemarks() {
+		return Boolean.TRUE.equals(config.Settings.Ambient_Remarks);
+	}
+
+	public static String apiBase() {
+		String configured = config.Settings.Open_AI_API_Url;
+		String base = configured == null ? "" : configured.trim();
+		if (base.isEmpty()) {
+			return "https://api.openai.com/v1";
+		}
+		while (base.endsWith("/")) {
+			base = base.substring(0, base.length() - 1);
+		}
+		if (base.endsWith("/chat/completions")) {
+			base = base.substring(0, base.length() - "/chat/completions".length());
+		}
+		if (base.endsWith("/responses")) {
+			base = base.substring(0, base.length() - "/responses".length());
+		}
+		if (base.endsWith("/conversations")) {
+			base = base.substring(0, base.length() - "/conversations".length());
+		}
+		return base;
+	}
 }
