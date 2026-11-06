@@ -212,10 +212,10 @@ public final class VillagerBubble {
 		double sideZ = forwardX;
 		double chest = y + height * 0.58;
 		return switch (ConfigLoader.bubblePosition()) {
-			case "head", "upper", "upper_head" -> new Vec3(x, y + height + 0.32, z);
+			case "front", "body" -> new Vec3(x + forwardX * 0.4, chest, z + forwardZ * 0.4);
 			case "left" -> new Vec3(x + sideX * 0.55, chest, z + sideZ * 0.55);
 			case "right" -> new Vec3(x - sideX * 0.55, chest, z - sideZ * 0.55);
-			default -> new Vec3(x + forwardX * 0.4, chest, z + forwardZ * 0.4);
+			default -> new Vec3(x, y + height + 0.32, z);
 		};
 	}
 

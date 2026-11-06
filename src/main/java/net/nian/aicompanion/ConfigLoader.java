@@ -46,7 +46,7 @@ public final class ConfigLoader {
 				}
 			}
 			if (config.Settings.Bubble_Position == null || config.Settings.Bubble_Position.isBlank()) {
-				config.Settings.Bubble_Position = "front";
+				config.Settings.Bubble_Position = "head";
 				Files.writeString(CONFIG_PATH, new GsonBuilder().setPrettyPrinting().create().toJson(config));
 			}
 		} catch (IOException e) {
@@ -83,7 +83,7 @@ public final class ConfigLoader {
 	public static String bubblePosition() {
 		String value = config.Settings.Bubble_Position;
 		if (value == null || value.isBlank()) {
-			return "front";
+			return "head";
 		}
 		return value.trim().toLowerCase(Locale.ROOT);
 	}

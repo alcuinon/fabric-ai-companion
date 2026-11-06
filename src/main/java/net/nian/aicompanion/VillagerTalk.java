@@ -47,9 +47,7 @@ public final class VillagerTalk {
 			}
 			if (!tooSoon(serverPlayer.getUUID() + ":" + villager.getUUID(), 2500)) {
 				String speaker = serverPlayer.getName().getString();
-				askVillager(conversations, serverPlayer, villager,
-						speaker + " walks up and wants to talk. Greet them. If you have met them before, show that you remember.",
-						false, true);
+				askVillager(conversations, serverPlayer, villager, VillagerContext.greeting(villager, speaker), false, true);
 			}
 			return InteractionResult.SUCCESS;
 		});

@@ -53,11 +53,23 @@ final class VillagerContext {
 		text.append("Your manner: ").append(traits(villager)).append(". ");
 		text.append("Many players share this one life with you. Each line starts with the speaker's name. Remember them. ");
 		text.append(scene(villager, focus));
-		text.append(" Reply in one or two short spoken sentences. Use these facts when they matter. Never mention being an AI.");
-		if (text.length() > 1400) {
-			return text.substring(0, 1400);
+		if (sells(villager)) {
+			text.append("You are working your stall. When you talk to a player, make a short sales pitch for one thing you sell. ");
+			text.append("Say the item name and the exact cost from Your goods. Never invent an item, a price, or a stock count. ");
+		}
+		text.append("Reply in one or two short spoken sentences. Never mention being an AI.");
+		if (text.length() > 1800) {
+			return text.substring(0, 1800);
 		}
 		return text.toString();
+	}
+
+	static String greeting(Villager villager, String speaker) {
+		MerchantOffer offer = pitchOffer(villager, ItemStack.EMPTY);
+		if (offer == null) {
+			return speaker + " walks up and wants to talk. Greet them. If you have met them before, show that you remember.";
+		}
+		return speaker + " walks up to your stall. Greet them and offer a trade. " + offerPitch(offer);
 	}
 
 	static String impulse(Villager villager, ServerPlayer player) {
@@ -65,9 +77,9 @@ final class VillagerContext {
 		if (hostileNearby(villager)) {
 			return "a hostile mob is close, and you want to warn " + name;
 		}
-		String trade = tradeTouching(villager, player.getMainHandItem());
-		if (trade != null) {
-			return name + " is carrying something from your stall (" + trade + "), and you want to mention it";
+		MerchantOffer offer = pitchOffer(villager, player.getMainHandItem());
+		if (offer != null) {
+			return "you want to sell to " + name + ". " + offerPitch(offer);
 		}
 		if (villager.level() instanceof ServerLevel level && level.isRaining()) {
 			return "the weather has turned, and you want to say so to " + name;
@@ -85,7 +97,7 @@ final class VillagerContext {
 	private static String scene(Villager villager, ServerPlayer focus) {
 		StringBuilder text = new StringBuilder();
 		text.append("Right now it is ").append(timeOfDay(villager)).append(" and ").append(weather(villager)).append(". ");
-		text.append("Your goods: ").append(trades(villager)).append(". ");
+		text.append("Your goods, with the real cost: ").append(trades(villager)).append(". ");
 		text.append(focus.getName().getString()).append(" is here, ").append(gear(focus)).append(". ");
 		String others = otherPlayers(villager, focus);
 		if (!others.isEmpty()) {
@@ -106,46 +118,80 @@ final class VillagerContext {
 		StringBuilder text = new StringBuilder();
 		int shown = 0;
 		for (MerchantOffer offer : offers) {
-			if (shown == 5) {
+			if (shown == 8) {
 				break;
 			}
 			if (shown > 0) {
 				text.append("; ");
 			}
-			text.append(price(offer)).append(" -> ").append(stackName(offer.getResult()));
-			if (offer.isOutOfStock()) {
-				text.append(" (sold out)");
-			} else {
-				text.append(" (").append(Math.max(0, offer.getMaxUses() - offer.getUses())).append(" left)");
-			}
+			text.append(offerLine(offer));
 			shown++;
 		}
 		return text.toString();
 	}
 
+	private static boolean sells(Villager villager) {
+		String job = VillagerTalk.professionPath(villager);
+		if (job.equals("none") || job.equals("nitwit") || job.equals("unemployed")) {
+			return false;
+		}
+		return pitchOffer(villager, ItemStack.EMPTY) != null;
+	}
+
+	private static MerchantOffer pitchOffer(Villager villager, ItemStack held) {
+		MerchantOffers offers = villager.getOffers();
+		if (offers == null || offers.isEmpty()) {
+			return null;
+		}
+		MerchantOffer fallback = null;
+		MerchantOffer soldOut = null;
+		Item heldItem = held == null || held.isEmpty() ? null : held.getItem();
+		for (MerchantOffer offer : offers) {
+			boolean matches = heldItem != null && (offer.getCostA().getItem() == heldItem || offer.getCostB().getItem() == heldItem || offer.getResult().getItem() == heldItem);
+			if (offer.isOutOfStock()) {
+				if (matches) {
+					return offer;
+				}
+				if (soldOut == null) {
+					soldOut = offer;
+				}
+				continue;
+			}
+			if (matches) {
+				return offer;
+			}
+			if (fallback == null) {
+				fallback = offer;
+			}
+		}
+		return fallback != null ? fallback : soldOut;
+	}
+
+	private static String offerPitch(MerchantOffer offer) {
+		return "Offer this exact deal and no other: " + offerLine(offer) + ". Say the item and the cost.";
+	}
+
+	private static String offerLine(MerchantOffer offer) {
+		String line = "sells " + counted(offer.getResult()) + " for " + price(offer);
+		if (offer.isOutOfStock()) {
+			return line + ", sold out";
+		}
+		return line + ", " + Math.max(0, offer.getMaxUses() - offer.getUses()) + " left";
+	}
+
 	private static String price(MerchantOffer offer) {
-		String cost = stackName(offer.getCostA());
+		String cost = counted(offer.getCostA());
 		if (!offer.getCostB().isEmpty()) {
-			cost = cost + " + " + stackName(offer.getCostB());
+			cost = cost + " and " + counted(offer.getCostB());
 		}
 		return cost;
 	}
 
-	private static String tradeTouching(Villager villager, ItemStack held) {
-		if (held.isEmpty()) {
-			return null;
+	private static String counted(ItemStack stack) {
+		if (stack == null || stack.isEmpty()) {
+			return "";
 		}
-		Item item = held.getItem();
-		MerchantOffers offers = villager.getOffers();
-		if (offers == null) {
-			return null;
-		}
-		for (MerchantOffer offer : offers) {
-			if (offer.getCostA().getItem() == item || offer.getCostB().getItem() == item || offer.getResult().getItem() == item) {
-				return price(offer) + " -> " + stackName(offer.getResult());
-			}
-		}
-		return null;
+		return stack.getCount() + " " + stack.getHoverName().getString();
 	}
 
 	private static String gear(ServerPlayer player) {
