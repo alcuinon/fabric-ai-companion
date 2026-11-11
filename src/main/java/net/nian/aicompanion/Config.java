@@ -11,5 +11,6 @@ public class Config {
 		public String AI_Personality = "Bright Guide - Warm, attentive, and curious. Talks like a friend who wants the players safe.";
 		public Boolean Ambient_Remarks = false;
 		public String Bubble_Position = "head";
+		public String Chatty = "nearby";
 	}
 }

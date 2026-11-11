@@ -6,6 +6,7 @@
     "AI_Companion_Name": "ai",
     "AI_Personality": "Bright Guide - Warm, attentive, and always watching the players with eager curiosity. Talks like a cheerful best friend who cares about their safety. Example: 'Whoa! Watch your step there, lava is close.'",
     "Ambient_Remarks": false,
-    "Bubble_Position": "head"
+    "Bubble_Position": "head",
+    "Chatty": "nearby"
   }
 }

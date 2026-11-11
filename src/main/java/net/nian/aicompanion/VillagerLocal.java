@@ -64,7 +64,12 @@ final class VillagerLocal {
 	}
 
 	static void addressCrowd(ServerPlayer sender, String text) {
-		List<Villager> villagers = nearby(sender, CROWD_RANGE);
+		List<Villager> villagers = new ArrayList<>();
+		for (Villager villager : nearby(sender, CROWD_RANGE)) {
+			if (!villager.isSleeping()) {
+				villagers.add(villager);
+			}
+		}
 		if (villagers.isEmpty()) {
 			return;
 		}
@@ -144,7 +149,7 @@ final class VillagerLocal {
 			PENDING.remove(i);
 			ServerLevel level = server.getLevel(pending.dimension);
 			Entity entity = level == null ? null : level.getEntity(pending.villagerId);
-			if (!(entity instanceof Villager villager) || !villager.isAlive()) {
+			if (!(entity instanceof Villager villager) || !villager.isAlive() || villager.isSleeping()) {
 				continue;
 			}
 			ServerPlayer player = server.getPlayerList().getPlayer(pending.playerId);
@@ -194,6 +199,9 @@ final class VillagerLocal {
 		double best = GREET_RANGE * GREET_RANGE;
 		long time = player.level().getGameTime();
 		for (Villager villager : around) {
+			if (villager.isSleeping()) {
+				continue;
+			}
 			double distance = villager.distanceToSqr(player);
 			if (distance > best) {
 				continue;
@@ -217,11 +225,8 @@ final class VillagerLocal {
 	}
 
 	private static void warnDanger(ServerPlayer player, List<Villager> around) {
-		if (around.isEmpty()) {
-			return;
-		}
-		Villager villager = around.getFirst();
-		if (VillagerBubble.isActive(villager.getUUID())) {
+		Villager villager = firstAwake(around);
+		if (villager == null || VillagerBubble.isActive(villager.getUUID())) {
 			return;
 		}
 		long time = player.level().getGameTime();
@@ -253,8 +258,8 @@ final class VillagerLocal {
 		if (!rainStarted && !nightStarted) {
 			return;
 		}
-		Villager villager = around.getFirst();
-		if (VillagerBubble.isActive(villager.getUUID())) {
+		Villager villager = firstAwake(around);
+		if (villager == null || VillagerBubble.isActive(villager.getUUID())) {
 			return;
 		}
 		long time = player.level().getGameTime();
@@ -275,6 +280,15 @@ final class VillagerLocal {
 	private static void remember(ServerPlayer player, Villager villager) {
 		NEXT_LINE.put("greet:" + pair(player, villager), player.level().getGameTime() + GREET_QUIET);
 		VillagerTalk.quiet(villager, 20L * 30);
+	}
+
+	private static Villager firstAwake(List<Villager> around) {
+		for (Villager villager : around) {
+			if (!villager.isSleeping()) {
+				return villager;
+			}
+		}
+		return null;
 	}
 
 	private static List<Villager> nearby(ServerPlayer player, double range) {

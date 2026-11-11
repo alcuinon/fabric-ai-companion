@@ -45,8 +45,16 @@ public final class ConfigLoader {
 					config = loaded;
 				}
 			}
+			boolean rewrite = false;
 			if (config.Settings.Bubble_Position == null || config.Settings.Bubble_Position.isBlank()) {
 				config.Settings.Bubble_Position = "head";
+				rewrite = true;
+			}
+			if (config.Settings.Chatty == null || config.Settings.Chatty.isBlank()) {
+				config.Settings.Chatty = "nearby";
+				rewrite = true;
+			}
+			if (rewrite) {
 				Files.writeString(CONFIG_PATH, new GsonBuilder().setPrettyPrinting().create().toJson(config));
 			}
 		} catch (IOException e) {
@@ -78,6 +86,27 @@ public final class ConfigLoader {
 
 	public static boolean ambientRemarks() {
 		return Boolean.TRUE.equals(config.Settings.Ambient_Remarks);
+	}
+
+	public static String chatty() {
+		String value = config.Settings.Chatty;
+		if (value == null || value.isBlank()) {
+			return "nearby";
+		}
+		String mode = value.trim().toLowerCase(Locale.ROOT).replace('_', '-');
+		return switch (mode) {
+			case "off", "none", "false" -> "off";
+			case "look", "look-only", "lookonly" -> "look";
+			default -> "nearby";
+		};
+	}
+
+	public static boolean villagersHearChat() {
+		return !"off".equals(chatty());
+	}
+
+	public static boolean chatLooksOnly() {
+		return "look".equals(chatty());
 	}
 
 	public static String bubblePosition() {

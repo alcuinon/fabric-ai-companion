@@ -23,6 +23,10 @@ final class VillagerContext {
 	}
 
 	static String instructions(Villager villager, ServerPlayer focus) {
+		return instructions(villager, focus, null, false);
+	}
+
+	static String instructions(Villager villager, ServerPlayer focus, String otherVillager, boolean answering) {
 		String job = VillagerTalk.professionPath(villager);
 		StringBuilder text = new StringBuilder();
 		text.append("You are ").append(VillagerTalk.displayName(villager))
@@ -32,9 +36,15 @@ final class VillagerContext {
 		text.append(VillagerPersona.describe(villager)).append(' ');
 		text.append("Many players share this one life with you. Each line starts with the speaker's name. Remember them. ");
 		text.append(scene(villager, focus));
-		if (sells(villager)) {
+		if (otherVillager == null && sells(villager)) {
 			text.append("You are working your stall. When you talk to a player, make a short sales pitch for one thing you sell. ");
 			text.append("Say the item name and the exact cost from Your goods. Never invent an item, a price, or a stock count. ");
+		}
+		if (otherVillager != null) {
+			text.append("You are speaking to ").append(otherVillager).append(", another villager, not to the player. ");
+			text.append(answering
+					? "Answer once in one sentence. Do not ask a question. "
+					: "Say one sentence to them. ");
 		}
 		text.append("Reply in one or two short spoken sentences. Never mention being an AI.");
 		if (text.length() > 1800) {

@@ -33,8 +33,11 @@ public final class VillagerTalk {
 	private static final ConcurrentHashMap<String, Long> RECENT = new ConcurrentHashMap<>();
 	private static final Map<UUID, Long> NEXT_VILLAGER_TALK = new HashMap<>();
 	private static final Map<UUID, Long> NEXT_PLAYER_TALK = new HashMap<>();
+	private static final Map<UUID, Long> NEXT_PAIR_CHAT = new HashMap<>();
 	private static final long VILLAGER_QUIET_TICKS = 20L * 60 * 12;
 	private static final long PLAYER_QUIET_TICKS = 20L * 60 * 4;
+	private static final long PAIR_AREA_QUIET = 20L * 60 * 4;
+	private static final double PAIR_RANGE_SQR = 25.0;
 	private static int initiativeTick;
 
 	private VillagerTalk() {
@@ -48,7 +51,7 @@ public final class VillagerTalk {
 			if (level.isClientSide() || !(player instanceof ServerPlayer serverPlayer)) {
 				return InteractionResult.SUCCESS;
 			}
-			if (!tooSoon(serverPlayer.getUUID() + ":" + villager.getUUID(), 2500)) {
+			if (!villager.isSleeping() && !tooSoon(serverPlayer.getUUID() + ":" + villager.getUUID(), 2500)) {
 				String speaker = serverPlayer.getName().getString();
 				askVillager(conversations, serverPlayer, villager, VillagerContext.greeting(villager, speaker), false, true);
 			}
@@ -77,7 +80,7 @@ public final class VillagerTalk {
 				String token = split < 0 ? text.substring(1) : text.substring(1, split);
 				String rest = split < 0 ? "" : text.substring(split).trim();
 				Villager named = findNamed(sender, token);
-				if (named != null) {
+				if (named != null && !named.isSleeping()) {
 					String speaker = sender.getName().getString();
 					String line = rest.isEmpty()
 							? speaker + " says hello. Greet them, and show that you remember them if you have talked before."
@@ -88,7 +91,9 @@ public final class VillagerTalk {
 			}
 
 			if (VillagerLocal.isCrowd(text)) {
-				VillagerLocal.addressCrowd(sender, text);
+				if (ConfigLoader.villagersHearChat()) {
+					VillagerLocal.addressCrowd(sender, text);
+				}
 				return true;
 			}
 
@@ -104,7 +109,9 @@ public final class VillagerTalk {
 				return;
 			}
 			for (ServerPlayer player : server.getPlayerList().getPlayers()) {
-				considerSpeaking(conversations, player);
+				if (!considerSpeaking(conversations, player)) {
+					considerVillagerChat(conversations, player);
+				}
 			}
 		});
 	}
@@ -193,18 +200,18 @@ public final class VillagerTalk {
 				+ "Reply in one or two short spoken sentences. Never mention being an AI, a model, or a conversation.";
 	}
 
-	private static void considerSpeaking(OpenAIConversations conversations, ServerPlayer player) {
+	private static boolean considerSpeaking(OpenAIConversations conversations, ServerPlayer player) {
 		if (player.isSpectator() || player.isDeadOrDying()) {
-			return;
+			return false;
 		}
 		long now = player.level().getGameTime();
 		if (now < NEXT_PLAYER_TALK.getOrDefault(player.getUUID(), 0L)) {
-			return;
+			return false;
 		}
 		Villager chosen = null;
 		double best = 36;
 		for (Villager villager : player.level().getEntitiesOfClass(Villager.class, player.getBoundingBox().inflate(6), Villager::isAlive)) {
-			if (now < NEXT_VILLAGER_TALK.getOrDefault(villager.getUUID(), 0L) || VillagerBubble.isActive(villager.getUUID())) {
+			if (villager.isSleeping() || now < NEXT_VILLAGER_TALK.getOrDefault(villager.getUUID(), 0L) || VillagerBubble.isActive(villager.getUUID())) {
 				continue;
 			}
 			double distance = villager.distanceToSqr(player);
@@ -214,15 +221,15 @@ public final class VillagerTalk {
 			}
 		}
 		if (chosen == null) {
-			return;
+			return false;
 		}
 		String impulse = VillagerContext.impulse(chosen, player);
 		if (impulse == null) {
-			return;
+			return false;
 		}
 		long mix = now ^ player.getUUID().getLeastSignificantBits() ^ chosen.getUUID().getLeastSignificantBits();
 		if (Math.floorMod(mix, 12) != 0) {
-			return;
+			return false;
 		}
 		NEXT_VILLAGER_TALK.put(chosen.getUUID(), now + VILLAGER_QUIET_TICKS);
 		NEXT_PLAYER_TALK.put(player.getUUID(), now + PLAYER_QUIET_TICKS);
@@ -230,6 +237,100 @@ public final class VillagerTalk {
 		askVillager(conversations, player, chosen,
 				name + " is nearby. " + impulse + ". Say one short sentence to " + name + ".",
 				false, false);
+		return true;
+	}
+
+	private static void considerVillagerChat(OpenAIConversations conversations, ServerPlayer player) {
+		if (player.isSpectator() || player.isDeadOrDying()) {
+			return;
+		}
+		long now = player.level().getGameTime();
+		if (now < NEXT_PAIR_CHAT.getOrDefault(player.getUUID(), 0L)) {
+			return;
+		}
+		List<Villager> group = player.level().getEntitiesOfClass(
+				Villager.class, player.getBoundingBox().inflate(12), villager -> villager.isAlive() && !villager.isSleeping());
+		Villager speaker = null;
+		Villager listener = null;
+		double best = PAIR_RANGE_SQR + 1;
+		for (int i = 0; i < group.size(); i++) {
+			Villager first = group.get(i);
+			if (busy(first, now)) {
+				continue;
+			}
+			for (int j = i + 1; j < group.size(); j++) {
+				Villager second = group.get(j);
+				if (busy(second, now)) {
+					continue;
+				}
+				double distance = first.distanceToSqr(second);
+				if (distance <= PAIR_RANGE_SQR && distance < best) {
+					best = distance;
+					speaker = first;
+					listener = second;
+				}
+			}
+		}
+		if (speaker == null || listener == null) {
+			return;
+		}
+		if (speaker.distanceToSqr(player) > listener.distanceToSqr(player)) {
+			Villager swap = speaker;
+			speaker = listener;
+			listener = swap;
+		}
+		long mix = now ^ speaker.getUUID().getLeastSignificantBits() ^ listener.getUUID().getLeastSignificantBits();
+		if (Math.floorMod(mix, 8) != 0) {
+			return;
+		}
+		NEXT_PAIR_CHAT.put(player.getUUID(), now + PAIR_AREA_QUIET);
+		quiet(speaker, VILLAGER_QUIET_TICKS);
+		quiet(listener, VILLAGER_QUIET_TICKS);
+		askBetween(conversations, player, speaker, listener, null, true);
+	}
+
+	private static boolean busy(Villager villager, long now) {
+		return now < NEXT_VILLAGER_TALK.getOrDefault(villager.getUUID(), 0L) || VillagerBubble.isActive(villager.getUUID());
+	}
+
+	private static void askBetween(OpenAIConversations conversations, ServerPlayer witness, Villager speaker, Villager listener, String heardLine, boolean mayAnswer) {
+		MinecraftServer server = witness.level().getServer();
+		if (server == null || ConfigLoader.apiKey().isEmpty()) {
+			return;
+		}
+		UUID witnessId = witness.getUUID();
+		UUID speakerId = speaker.getUUID();
+		UUID listenerId = listener.getUUID();
+		var dimension = speaker.level().dimension();
+		String listenerName = displayName(listener);
+		String instructions = VillagerContext.instructions(speaker, witness, listenerName, !mayAnswer);
+		String line = mayAnswer
+				? listenerName + " is beside you. Say one short sentence to " + listenerName + "."
+				: listenerName + " says to you: " + heardLine;
+		conversations.ask(server, "villager:" + speakerId, instructions, line, reply -> {
+			if (reply == null || reply.isBlank()) {
+				return;
+			}
+			ServerLevel level = server.getLevel(dimension);
+			Entity entity = level == null ? null : level.getEntity(speakerId);
+			if (!(entity instanceof Villager talking) || !talking.isAlive() || talking.isSleeping()) {
+				return;
+			}
+			VillagerBubble.show(talking, reply);
+			if (!mayAnswer) {
+				return;
+			}
+			Entity other = level.getEntity(listenerId);
+			if (!(other instanceof Villager heard) || !heard.isAlive() || heard.isSleeping() || talking.distanceToSqr(heard) > 64) {
+				return;
+			}
+			talking.lookAt(heard, 40.0f, 40.0f);
+			ServerPlayer still = server.getPlayerList().getPlayer(witnessId);
+			if (still == null) {
+				return;
+			}
+			askBetween(conversations, still, heard, talking, reply, false);
+		});
 	}
 
 	static void quiet(Villager villager, long ticks) {
@@ -241,9 +342,15 @@ public final class VillagerTalk {
 	}
 
 	private static Villager villagerForChat(ServerPlayer player) {
+		if (!ConfigLoader.villagersHearChat()) {
+			return null;
+		}
 		Villager lookedAt = lookingAt(player);
 		if (lookedAt != null) {
-			return lookedAt;
+			return lookedAt.isSleeping() ? null : lookedAt;
+		}
+		if (ConfigLoader.chatLooksOnly()) {
+			return null;
 		}
 		return closest(player);
 	}
@@ -284,6 +391,9 @@ public final class VillagerTalk {
 		Villager chosen = null;
 		double best = NEAR_RANGE * NEAR_RANGE;
 		for (Villager villager : player.level().getEntitiesOfClass(Villager.class, player.getBoundingBox().inflate(NEAR_RANGE), Villager::isAlive)) {
+			if (villager.isSleeping()) {
+				continue;
+			}
 			double distance = villager.distanceToSqr(player);
 			if (distance < best) {
 				best = distance;
