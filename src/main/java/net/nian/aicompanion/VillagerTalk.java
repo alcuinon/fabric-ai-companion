@@ -87,8 +87,13 @@ public final class VillagerTalk {
 				return true;
 			}
 
+			if (VillagerLocal.isCrowd(text)) {
+				VillagerLocal.addressCrowd(sender, text);
+				return true;
+			}
+
 			Villager target = villagerForChat(sender);
-			if (target != null) {
+			if (target != null && !VillagerLocal.tryCanned(sender, target, text)) {
 				askVillager(conversations, sender, target, sender.getName().getString() + ": " + text, true, true);
 			}
 			return true;
@@ -128,7 +133,7 @@ public final class VillagerTalk {
 		});
 	}
 
-	private static void askVillager(OpenAIConversations conversations, ServerPlayer sender, Villager villager, String line, boolean paceChat, boolean warnMissingKey) {
+	static void askVillager(OpenAIConversations conversations, ServerPlayer sender, Villager villager, String line, boolean paceChat, boolean warnMissingKey) {
 		if (ConfigLoader.apiKey().isEmpty()) {
 			if (warnMissingKey) {
 				hasKey(sender);
@@ -169,7 +174,7 @@ public final class VillagerTalk {
 		});
 	}
 
-	private static boolean hasKey(ServerPlayer player) {
+	static boolean hasKey(ServerPlayer player) {
 		if (!ConfigLoader.apiKey().isEmpty()) {
 			return true;
 		}
@@ -211,6 +216,10 @@ public final class VillagerTalk {
 		if (chosen == null) {
 			return;
 		}
+		String impulse = VillagerContext.impulse(chosen, player);
+		if (impulse == null) {
+			return;
+		}
 		long mix = now ^ player.getUUID().getLeastSignificantBits() ^ chosen.getUUID().getLeastSignificantBits();
 		if (Math.floorMod(mix, 12) != 0) {
 			return;
@@ -219,8 +228,16 @@ public final class VillagerTalk {
 		NEXT_PLAYER_TALK.put(player.getUUID(), now + PLAYER_QUIET_TICKS);
 		String name = player.getName().getString();
 		askVillager(conversations, player, chosen,
-				name + " is nearby. " + VillagerContext.impulse(chosen, player) + ". Say one short sentence to " + name + ".",
+				name + " is nearby. " + impulse + ". Say one short sentence to " + name + ".",
 				false, false);
+	}
+
+	static void quiet(Villager villager, long ticks) {
+		long now = villager.level().getGameTime();
+		long until = now + ticks;
+		if (until > NEXT_VILLAGER_TALK.getOrDefault(villager.getUUID(), 0L)) {
+			NEXT_VILLAGER_TALK.put(villager.getUUID(), until);
+		}
 	}
 
 	private static Villager villagerForChat(ServerPlayer player) {

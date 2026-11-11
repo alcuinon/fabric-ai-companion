@@ -19,27 +19,6 @@ import java.util.Map;
  * Built on the server thread, then sent with the next reply.
  */
 final class VillagerContext {
-	private static final String[] MANNERS = {
-			"speaks softly",
-			"speaks in a bright, quick way",
-			"is blunt and a little grumpy",
-			"is warm and nosy",
-			"is proud and formal",
-			"is shy until the topic is their work",
-			"teases people gently",
-			"worries easily and shows it"
-	};
-	private static final String[] HABITS = {
-			"notices what people are holding",
-			"comments on the weather",
-			"remembers favors and slights",
-			"brags when a trade is a good one",
-			"gets nervous when monsters are close",
-			"asks where someone has been",
-			"haggles even during small talk",
-			"treats regulars like neighbors"
-	};
-
 	private VillagerContext() {
 	}
 
@@ -50,7 +29,7 @@ final class VillagerContext {
 				.append(", a level ").append(villager.getVillagerData().level()).append(' ')
 				.append(job.replace('_', ' ')).append(" villager. ");
 		text.append(flavor(job)).append(' ');
-		text.append("Your manner: ").append(traits(villager)).append(". ");
+		text.append(VillagerPersona.describe(villager)).append(' ');
 		text.append("Many players share this one life with you. Each line starts with the speaker's name. Remember them. ");
 		text.append(scene(villager, focus));
 		if (sells(villager)) {
@@ -81,17 +60,11 @@ final class VillagerContext {
 		if (offer != null) {
 			return "you want to sell to " + name + ". " + offerPitch(offer);
 		}
-		if (villager.level() instanceof ServerLevel level && level.isRaining()) {
-			return "the weather has turned, and you want to say so to " + name;
-		}
-		if (isNight(villager)) {
-			return "night is here, and you want to mention it to " + name;
-		}
 		String held = stackName(player.getMainHandItem());
 		if (!held.isEmpty()) {
 			return name + " is holding " + held + ", and you want to remark on it";
 		}
-		return "you feel like greeting " + name;
+		return null;
 	}
 
 	private static String scene(Villager villager, ServerPlayer focus) {
@@ -313,13 +286,6 @@ final class VillagerContext {
 			return "dusk";
 		}
 		return "night";
-	}
-
-	private static String traits(Villager villager) {
-		long bits = villager.getUUID().getLeastSignificantBits() ^ villager.getUUID().getMostSignificantBits();
-		String manner = MANNERS[Math.floorMod((int) bits, MANNERS.length)];
-		String habit = HABITS[Math.floorMod((int) (bits >>> 8), HABITS.length)];
-		return manner + ", and " + habit;
 	}
 
 	private static String flavor(String job) {

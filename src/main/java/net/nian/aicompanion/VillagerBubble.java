@@ -3,10 +3,12 @@ package net.nian.aicompanion;
 import com.mojang.math.Transformation;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.ChatFormatting;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundEvents;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Display;
@@ -20,6 +22,7 @@ import org.joml.Quaternionf;
 import org.joml.Vector3f;
 
 import java.util.Iterator;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -62,7 +65,7 @@ public final class VillagerBubble {
 			style(existing);
 			place(level, existing, villager);
 			current.expire = expire;
-			speak(level, villager);
+			react(level, villager, text);
 			return;
 		}
 
@@ -76,7 +79,7 @@ public final class VillagerBubble {
 			return;
 		}
 		place(level, display, villager);
-		speak(level, villager);
+		react(level, villager, text);
 		ACTIVE.put(villager.getUUID(), new LiveBubble(display.getUUID(), villager.getUUID(), level.dimension(), expire));
 	}
 
@@ -242,10 +245,87 @@ public final class VillagerBubble {
 		return block.toString();
 	}
 
-	private static void speak(ServerLevel level, Villager villager) {
-		int step = Math.floorMod(villager.getUUID().hashCode(), 5);
-		float pitch = 0.9f + step * 0.035f;
-		level.playSound(null, villager, SoundEvents.VILLAGER_AMBIENT, SoundSource.NEUTRAL, 0.9f, pitch);
+	private static void react(ServerLevel level, Villager villager, String text) {
+		Mood mood = mood(text);
+		SoundEvent sound = switch (mood) {
+			case HAPPY -> SoundEvents.VILLAGER_YES;
+			case CELEBRATE -> SoundEvents.VILLAGER_CELEBRATE;
+			case TRADE -> SoundEvents.VILLAGER_TRADE;
+			case NO -> SoundEvents.VILLAGER_NO;
+			case HURT -> SoundEvents.VILLAGER_HURT;
+			case NEUTRAL -> SoundEvents.VILLAGER_AMBIENT;
+		};
+		level.playSound(null, villager, sound, SoundSource.NEUTRAL, 0.9f, VillagerPersona.pitch(villager));
+		ServerPlayer focus = nearest(level, villager);
+		if (focus != null) {
+			villager.lookAt(focus, 40.0f, 40.0f);
+		}
+		double x = villager.getX();
+		double y = villager.getEyeY();
+		double z = villager.getZ();
+		switch (mood) {
+			case HAPPY -> level.sendParticles(ParticleTypes.HAPPY_VILLAGER, x, y, z, 5, 0.3, 0.2, 0.3, 0.01);
+			case CELEBRATE -> {
+				level.sendParticles(ParticleTypes.HAPPY_VILLAGER, x, y, z, 8, 0.35, 0.3, 0.35, 0.02);
+				if (villager.onGround()) {
+					villager.jumpFromGround();
+				}
+			}
+			case TRADE -> level.sendParticles(ParticleTypes.HAPPY_VILLAGER, x, y, z, 3, 0.2, 0.15, 0.2, 0.01);
+			case NO -> level.sendParticles(ParticleTypes.ANGRY_VILLAGER, x, y + 0.2, z, 4, 0.25, 0.15, 0.25, 0.0);
+			case HURT, NEUTRAL -> {
+			}
+		}
+	}
+
+	private static Mood mood(String text) {
+		String said = text.toLowerCase(Locale.ROOT);
+		if (word(said, "ouch") || word(said, "ow") || said.contains("that hurt")) {
+			return Mood.HURT;
+		}
+		if (word(said, "no") || word(said, "nope") || said.contains("sorry") || said.contains("can't") || said.contains("cannot") || said.contains("sold out")) {
+			return Mood.NO;
+		}
+		if (said.contains("emerald") || word(said, "trade") || word(said, "buy") || word(said, "sell") || said.contains("cost") || said.contains("price")) {
+			return Mood.TRADE;
+		}
+		if (said.contains("wonderful") || said.contains("haha") || said.contains("amazing") || said.contains("hooray") || said.contains("love this")) {
+			return Mood.CELEBRATE;
+		}
+		if (word(said, "hi") || word(said, "hello") || word(said, "yes") || said.contains("thank") || said.contains("glad") || said.contains("happy") || said.contains("great") || said.contains("welcome") || said.contains("pleased")) {
+			return Mood.HAPPY;
+		}
+		if (said.contains("look out") || said.contains("careful") || said.contains("watch it") || said.contains("danger")) {
+			return Mood.NO;
+		}
+		return Mood.NEUTRAL;
+	}
+
+	private static boolean word(String text, String word) {
+		int from = 0;
+		while (from <= text.length() - word.length()) {
+			int at = text.indexOf(word, from);
+			if (at < 0) {
+				return false;
+			}
+			int end = at + word.length();
+			boolean left = at == 0 || !Character.isLetter(text.charAt(at - 1));
+			boolean right = end >= text.length() || !Character.isLetter(text.charAt(end));
+			if (left && right) {
+				return true;
+			}
+			from = at + 1;
+		}
+		return false;
+	}
+
+	private enum Mood {
+		HAPPY,
+		CELEBRATE,
+		TRADE,
+		NO,
+		HURT,
+		NEUTRAL
 	}
 
 	private static int duration(String text) {
